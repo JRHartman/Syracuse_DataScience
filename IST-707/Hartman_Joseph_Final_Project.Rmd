@@ -1,0 +1,218 @@
+---
+title: "IST-565 Final Project: Black Friday Market Basket Analysis and Consumer Predictions"
+author: "Joseph Hartman"
+date: "September 22, 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Abstract
+Improving customer insight is a goal that all retail companies strive to accomplish. With the digital age and the surplus of consumer information these companies are aggregating, it can difficult finding these insights hidden in the sea of data. Fortunately, using data mining techniques one can derive some insight about consumer buying habits and target markets when creating their marketing material. To show an example of the application of data mining in this sphere, we'll be using a sample (10,000 observations) of the Black Friday dataset found on [Kaggle](https://www.kaggle.com/mehdidag/black-friday). We'll be trying to answer two questions and use two different Data Mining techniques to answer them:
+
+1. What kinds of products do consumers buy in conjunction with other products? (Association Rule)
+2. Can we create a method of predicting what items our consumers will buy and how much they'll spend based on demographic information? (Naive Bayes & Random Forest)
+
+## Data Exploration
+
+Packages that are used in this project
+```{r, warning=FALSE}
+library(caret)
+library(psych)
+library(RWeka)
+library(randomForest)
+library(arulesViz)
+library(arules)
+```
+
+First step is to import the data and remove any null values that might mess with our models.
+
+```{r}
+bf.data <- na.omit(read.csv("~/data/BlackFriday.csv"))
+```
+
+The `read.csv` function usually does a decent job at classify variables in the right types, but sometimes, additional work is needed to convert certain variables into factors that were imported in as a numeric. We also don't need the first two columns which are just Customer and Order ID numbers.
+
+```{r}
+#removes customer and order ID numbers
+bf.data <- bf.data[,-(1:2)]
+#changes everything but Purchase to nominal variables
+bf.data$Occupation <- factor(bf.data$Occupation)
+bf.data$Marital_Status <- factor(ifelse(bf.data$Marital_Status == TRUE, "yes", "no"))
+bf.data$Product_Category_1 <- factor(bf.data$Product_Category_1)
+bf.data$Product_Category_2 <- factor(bf.data$Product_Category_2)
+bf.data$Product_Category_3 <- factor(bf.data$Product_Category_3)
+```
+
+Now for the purposes of this project and just to reduce the computation time for these models we'll only be using 10,000 observations from this dataset in order to demonstrate certain data mining techniques while still having enough data to generate decent models.
+
+```{r}
+set.seed(1138)
+sample.index <- sample(1:nrow(bf.data), 10000, replace = FALSE)
+bf.data <- bf.data[sample.index,]
+knitr::kable(summary(bf.data))
+```
+
+
+The `psych` package has an excellent visualization function called `pairs.panels` that combines distributions, correlation values, and correlation scatterplots into one visualization. Using this, we can see how various parts of our customer data correlate to one another and see how our products correlate with one another and the basket purchase cost, which will be useful going into our association rules mining.
+
+```{r}
+pairs.panels(bf.data[,1:6])
+pairs.panels(bf.data[,7:10])
+```
+
+From here we can see that the factors that describe our customers (age, gender, marital status, etc.) are probably not correlated except age and marital status which have a slight correlation. On the other hand, it seems that the product categories have some degree of correlation. This makes sense as these our essentially just items and that the numbers describe the same product categories amongst all three product category columns (i.e product category 12 is the same in `Product_Category_1` as it is in `Product_Category_3`). It seems the purchase value has some negative correlation amongst the first product category column but not so much in the second and none in the third.
+
+
+Another interesting point to note is that there is a good sign of correlation between `Product_Category_1` and `Product_Category_2` (0.49) and `Product_Category_2` and `Product_Category_3`. From here we can infer a likelihood that purchasing an item in 1 might mean purchasing an item in 2 and that purchasing an item might lead to purchasing an item in 3.
+
+#### Creating the training and testing dataset
+
+To verify our predictive models, we'll be using the hold out method for final verification and cross-validation in between
+```{r}
+set.seed(1138) #sets a seed for reproducability
+index <- createDataPartition(bf.data$Product_Category_1, p = 0.8, list = FALSE) #creates an index in which to split the training dataset
+bf.test <- bf.data[-index,] #creates a dataset for model validation, 0.2 of the original training dataset
+bf.train <- bf.data[index,] #creates a dataset for training, .8 of the original dataset
+```
+
+## Business Question 1: What kinds of products do consumers buy in conjuction with other products?
+
+One task we can accomplish with this data set is seeing what types of items are customers buy in conjunction with one another. This is a task well suited for Association Rule (AR) mining.
+
+#### AR Mining
+```{r}
+names(bf.data)[7:9] <- c("P1", "P2", "P3") #renames Product Category to something more visualization friendly
+rules <- apriori(bf.data[,7:9], parameter = list(supp = 0.01, conf = 0.6, maxlen = 4), control = list(verbose = FALSE)) #creates the rules
+rules_conf <- sort(rules, by="support", decreasing=TRUE) #brings 'high-support' rules to the top
+inspect(head(rules_conf, 20)) # show the support, lift and confidence for all rules
+plot(head(rules_conf, 20), method = "graph") #displays a rules web
+```
+
+From here we see that types of items represented by 1 and 2 appear quite frequently in the top twenty rules. These items are probably common items or popular items that people buy during Black Friday. It also seems that type 1 items are bought in conjunction with various other items. In other words, despite whatever a person buys, there's a good chance they might also buy items of type 1. We also see that the support values drop sharply going down the list, despite consistently high values in confidence and list. This may be due that number of combinations of a three item basket is quite large and so only a few common basket trends would appear.
+
+## Business Question 2: Can we create a method of predicting what items our consumers will buy and how much they'll spend based on demographic information?
+We're going to use our models for two different predictions:
+
+* Based of our customer's information, we'll predict what kind of products they will buy
+* Based of our customer's information, we'll predict how much they will spend
+
+Since most of our data is nominal and ordinal, we'll be using Naive Bayes and Random Forest models, both well suited for predicting nominal outputs when given nominal predictors.
+
+
+We'll be creating 4 different models for each training method (1 for each product category and 1 for overall purchase cost) for a total of 8 models, using the first 6 columns as our predictors.
+
+#### Naive Bayes
+
+```{r}
+#discretizes numeric purchase variable to be used as outcome variable in Naive Bayes
+purchase.disc <- discretize(bf.data$Purchase, method = "cluster", breaks = 5)
+purchase.disc.train <- purchase.disc[index]
+purchase.disc.test <- purchase.disc[-index]
+
+NB <- make_Weka_classifier("weka/classifiers/bayes/NaiveBayes") #determines classifier
+#creates naive bayes models
+nb1 <- NB(Product_Category_1 ~ Gender + Age + Occupation + City_Category + Stay_In_Current_City_Years + Marital_Status, data = bf.train)
+nb2 <- NB(Product_Category_2 ~ Gender + Age + Occupation + City_Category + Stay_In_Current_City_Years + Marital_Status, data = bf.train)
+nb3 <- NB(Product_Category_3 ~ Gender + Age + Occupation + City_Category + Stay_In_Current_City_Years + Marital_Status, data = bf.train)
+nb4 <- NB(purchase.disc.train ~ Gender + Age + Occupation + City_Category + Stay_In_Current_City_Years + Marital_Status, data = bf.train)
+```
+
+Now that we have our models we can predict the outcomes of our testing dataset, this method of model validation is using the hold-out method. We'll build confusion matrices for each of the outcome variables and then plot their overall accuracy side by side.
+
+```{r}
+#creates predictions
+nb.predict1 <- predict(nb1, newdata = bf.test[,1:6])
+nb.predict2 <- predict(nb2, newdata = bf.test[,1:6])
+nb.predict3 <- predict(nb3, newdata = bf.test[,1:6])
+nb.predict4 <- predict(nb4, newdata = bf.test[,1:6])
+
+#creates confusion matricies
+nb.cm1 <- confusionMatrix(nb.predict1, bf.test$Product_Category_1)
+nb.cm2 <- confusionMatrix(nb.predict2, bf.test$Product_Category_2)
+nb.cm3 <- confusionMatrix(nb.predict3, bf.test$Product_Category_3)
+nb.cm4 <- confusionMatrix(nb.predict4, purchase.disc.test)
+
+#displays confusion matricies
+nb.cm1$table
+nb.cm2$table
+nb.cm3$table
+nb.cm4$table
+
+#plots overall hold-out method accuracy
+nb.accuracy <- c(nb.cm1$overall[1], nb.cm2$overall[1], nb.cm3$overall[1], nb.cm4$overall[1])
+nb.barplot <- barplot(nb.accuracy, main = "Naive Bayes Accuracy", names.arg = c("Item 1", "Item 2", "Item 3", "Purchase"))
+text(nb.barplot, nb.accuracy, labels=round(nb.accuracy,2), pos=3, offset=-1)
+
+```
+
+From here, we can see due to the unbalanced nature of the product information that our Naive Bayes model doesn't do a great job at predicting based of our customer data as the models are heavily biased. We identified earlier from our market basket analysis that `Product_Category_1 = 1` occurs many times. Because this item appears a lot in our dataset in relation to other items, it's throwing off our results. 
+
+#### Random Forest
+
+Let's see if the Random Forest method can create a better prediction
+
+```{r}
+set.seed(1138)
+###Builds the random forests
+bf.train$purchase.disc.train <- purchase.disc.train
+rf1 <- train(Product_Category_1 ~ Gender + Age + Occupation + City_Category + Stay_In_Current_City_Years + Marital_Status, 
+                  data = bf.train, method = "rf",
+                  tuneGrid = data.frame(mtry = seq(1:5)),
+                  trControl = trainControl(method = "cv", number = 5)) #5 fold cross validation
+rf2 <- train(Product_Category_2 ~ Gender + Age + Occupation + City_Category + Stay_In_Current_City_Years + Marital_Status, 
+                  data = bf.train, method = "rf",
+                  tuneGrid = data.frame(mtry = seq(1:5)),
+                  trControl = trainControl(method = "cv", number = 5)) #5 fold cross validation 
+rf3 <- train(Product_Category_3 ~ Gender + Age + Occupation + City_Category + Stay_In_Current_City_Years + Marital_Status, 
+                  data = bf.train, method = "rf",
+                  tuneGrid = data.frame(mtry = seq(1:5)),
+                  trControl = trainControl(method = "cv", number = 5)) #5 fold cross validation 
+rf4 <- train(purchase.disc.train ~ Gender + Age + Occupation + City_Category + Stay_In_Current_City_Years + Marital_Status, 
+                  data = bf.train, method = "rf",
+                  tuneGrid = data.frame(mtry = seq(1:5)),
+                  trControl = trainControl(method = "cv", number = 5)) #5 fold cross validation 
+```
+
+Again, using the hold-out method, we'll verify our models by building a confusion matrix and then verify our models' overall accuracy side by side.
+
+```{r}
+#creates predictions
+rf.predict1 <- predict(rf1, newdata = bf.test[,1:6])
+rf.predict2 <- predict(rf2, newdata = bf.test[,1:6])
+rf.predict3 <- predict(rf3, newdata = bf.test[,1:6])
+rf.predict4 <- predict(rf4, newdata = bf.test[,1:6])
+#creates confusion matricies
+rf.cm1 <- confusionMatrix(rf.predict1, bf.test$Product_Category_1)
+rf.cm2 <- confusionMatrix(rf.predict2, bf.test$Product_Category_2)
+rf.cm3 <- confusionMatrix(rf.predict3, bf.test$Product_Category_3)
+rf.cm4 <- confusionMatrix(rf.predict4, purchase.disc.test)
+
+#displays confusion matricies
+rf.cm1$table
+rf.cm2$table
+rf.cm3$table
+rf.cm4$table
+
+#plots overall hold-out method accuracy
+rf.accuracy <- c(rf.cm1$overall[1], rf.cm2$overall[1], rf.cm3$overall[1], rf.cm4$overall[1])
+rf.barplot <- barplot(rf.accuracy, main = "Random Forest Accuracy", names.arg = c("Item 1", "Item 2", "Item 3", "Purchase"))
+text(rf.barplot, rf.accuracy, labels=round(rf.accuracy,2), pos=3, offset=-1)
+
+```
+
+Again, due to the unbalanced nature of our data set our models are still very biased (if not more biased then our Naive Bayes models). We do see a 1% increase in accuracy when predicting items in `Product_Category_1` but overall, our accuracy pretty much remains the same.
+
+## Conclusion
+
+There are a multitude of factors as to why our models did not perform to the level we expected, including:
+
+* Heavily unbalanced outcome variables
+* lack of lengthy tuning processes (i.e. sequencing over a greater range of values for `mtry` and `ntree` to find ideal parameters)
+* sampling 10,000 observations wasn't enough
+
+Fixing problems 2 and 3 are easy to implement but come at the cost of increased computation time. As for problem 1, one possible solution might be to implement boosting, or a ensemble learning method that weighs unlikely outcomes more than likely outcomes over successive rounds of training. This might help reduce the bias problem and is something to look into in the future.
