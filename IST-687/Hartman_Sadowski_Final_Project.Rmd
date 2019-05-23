@@ -1,0 +1,336 @@
+---
+title: "Predicting Cervical Cancer"
+author: "Joseph Hartman and Josh Sadowski"
+output:
+  word_document: default
+  html_notebook: default
+---
+###Introduction
+
+Within modern healthcare there is a need to utilize data from Electronic Medical Records in order to attain [meaningful use](https://www.healthit.gov/topic/meaningful-use-and-macra/meaningful-use-and-macra). More recently, healthcare practitioners are turning towards more advanced modeling techniques to lead to better insights & better patient outcomes. 
+
+
+The analysis conducted here will simulate this analysis by utilizing an open dataset from [UC Irvine's Machine Learning Repository](https://archive.ics.uci.edu/ml/index.php) examining the risks for *Cervical Cancer*. 
+
+
+
+###Business Questions & Hypothsis
+
+Within this project, we are interested in investigating multiple hypotheses and use cases. 
+
+Modeling
+
+1. *Can the included variables be used to predict cervical cancer?*
+
+2. *Can the included variables be used to predict a secondary risk factor, HPV?*
+
+3. *Can we use our outcome variables as an input variable to predict other risk factors & high risk patient populations?*
+
+Implementation
+
+4. *Can we utilize the developed models as a detection tool for early detection tool for cervical cancer on admission?*
+
+5. *Can we utilze our model to determine the liklihood that a patient needs a biopsy?*
+
+
+
+###Data Acquisition, Cleaning, & Transformation
+
+Here are the libraries we'll need for this project
+
+```{r}
+library(ggplot2) #to make pretty visualizations
+library(cowplot) #to put our prettty visualizations in one grid
+library(GGally) #to do some correlation visualizations
+```
+
+This dataset is openly available by [clicking here](https://archive.ics.uci.edu/ml/machine-learning-databases/00383/risk_factors_cervical_cancer.csv). In this analysis we will utilize R's built-in functions to read a URL into a CSV & then store that written object to a dataframe. To make the dataset more easily read by our models, we'll also tell R where there are any null values.
+
+```{r}
+#Reading in the Data, cc for ease or naming & Cervical Cancer
+cc<-read.csv(url("https://archive.ics.uci.edu/ml/machine-learning-databases/00383/risk_factors_cervical_cancer.csv"), na.strings = "?")
+
+#Explore the top six rows to learn the data
+head(cc)
+```
+
+```{r}
+#Examine the structure of the data
+str(cc)
+```
+
+####Data Dictionary
+
+1. *Age*: Patient's age in years
+2. *Number.of.sexual.partners*: Number of sexual partners the patient has had
+3. *First.sexual.intercourse*: Age in years the patient first had sexual intercourse
+4. *Num.of.pregnancies*: Number of pregnancies the patient has had
+5. *Smokes*: Boolean, whether or not the patient smokes
+6. *Smokes..years.*: How many years the patient has smoked
+7. *Smokes..packs.year.*: How many packs of cigarettes the patient smokes
+8. *Hormonal.Contraceptives*: Boolean, whether or not the patient is using hormonal contraceptives like birth control pills
+9. *Hormonal.Contraceptives..years.*: How long the patient has been using birth control pills
+10. *IUD*: Boolean, whether or not the patient is using an IUD (intrauterine device)
+11. *IUD..years.*: Number of years a patient has been using an IUD
+12. *STDs*: Boolean, whether or not a patient has an STD
+13. *STDs..number.*: Number of STDs a patient has
+14. *STDs.condylomatosis*: Boolean, whether or not a patient has Condylomatosis
+15. *STDs.cervical.condylomatosis*: Boolean, whether or not a patient has Cervical Condylomatosis
+16. *STDs.vaginal.condylomatosis*:Boolean, whether or not a patient has Vaginal Condylomatosis
+17. *STDs.vulvo.perineal.condylomatosis*: Boolean, whether or not a patient has Vulvo Perineal Condylomatosis
+18. *STDs.syphilis*:Boolean, whether or not a patient has Syphilis
+19. *STDs.pelvic.inflammatory.disease*: Boolean, whether or not a patient has Pelvic Inflammatory Disease
+20. *STDs.genital.herpes*: Boolean, whether or not a patient has Genital Herpes
+21. *STDs.molluscum.contagiosum*: Boolean, whether or not a patient has Molluscum Contagiosum
+22. *STDs.AIDS*: Boolean, whether or not a patient has AIDS
+23. *STDs.HIV*: Boolean, whether or not a patient has HIV
+24. *STDs.Hepatitis.B*: Boolean, whether or not a patient has Hepatitis B
+25. *STDs.HPV*: Boolean, whether or not a patient has has HPV
+26. *STDs..Number.of.diagnosis*:Number of times a patient has been diagnosed with an STD
+27. *STDs..Time.since.first.diagnosis*: Time since patient's first positive diagnosis of an STD
+28. *STDs..Time.since.last.diagnosis*: Time since patient's last diagnosis of an STD
+29. *Dx.Cancer*: Boolean, whether or not a patient has been diagnosed with Cancer
+30. *Dx.CIN*: Boolean, whether or not a patient has been diagnosed with CIN (Cervical Intraepithelial Neoplasia)
+31. *Dx.HPV*: Boolean, whether or not a patient has been diagnosed with HPV
+32. *Dx*: Boolean, whether or not a patient has been diagnosed with Cervical Cancer (*I think I'm not entirely sure Josh*)
+33. *Hinselmann*: Boolean, Whether or not a patient's colonoscopy for cervical cancer tested positive *needs affirtmation*
+34. *Schiller*: Boolean, Whether or not a patient's Schiller's test for cervical cancer tested positive *needs affirmation*
+35. *Citology*: Boolean, Whether or not a patient's citology for cervical cancer tested positive *needs affirmation*
+36. *Biopsy*:Boolean, Whether or not a patient's bioposy of cervical cells for cervical cancer tested positive *needs affirmation*
+
+
+
+Many of the variables in the dataset are Boolean. For example, the elements of the variable `Smokes` either have the value `1` or `0` which represent `TRUE` and `FALSE` respectively if the prospective patient has ever smoked. This will be a challenge as we create our models due to the various type of data we have.
+
+###Descriptive Statistics & Visualizations
+
+Lets explore the first 4 variables of the dataset to get some basic demographic data and past sexual history
+
+```{r}
+sapply(cc[,1:4], summary, na.rm=TRUE)
+```
+
+```{r}
+plot1 <- ggplot(cc, aes(x=Age)) + geom_histogram(bins=30, color="black", fill="white") 
+plot2 <- ggplot(cc, aes(x=Number.of.sexual.partners)) + geom_histogram(bins=30, color="black", fill="white") + xlab("Number of Sexual Partners")
+plot3 <- ggplot(cc, aes(x=First.sexual.intercourse)) + geom_histogram(bins=30, color="black", fill="white") + xlab("First Sexual Intercourse")
+plot4 <- ggplot(cc, aes(x=Num.of.pregnancies)) + geom_histogram(bins=10, color="black", fill="white") + xlab("Number of Pregnancies")
+plot_grid(plot1, plot2, plot3, plot4, labels = "AUTO")
+```
+
+
+
+It seems that a good deal of the participants are in the 20s-30s.
+
+Now let's see how this looks like in a scatter plot where the x-axis relates to the age, the y-axis relates to the number of sexual partners, the size relates to the number of pregnancies they've had, and the size relates to their age when the person first had sexual intercourse
+
+```{r}
+ggpairs(cc,columns = 1:4,title="Cervical Cancer Risk Factor Exploration")
+```
+Here we can see that the strongest correlation is between the number of pregnancies a person has and how old they are. That makes sense, given that a person gets older with subsequent pregnancies.
+
+
+###Modeling Techniques
+
+To being modeling, we will be fitting basic models for understanding if we can create a predictive model to provide a risk score or likelihood of developing cervical cancer. We'll use a Naive Bayes model often used for classification and that assumes that all predictors contribute independently towards the probability of predicting an outcome, a neural net, which uses a series of nodes much like the brain's neurons to calculate local optima which correlate to some prediction or outcome, and a Gradient Boosted Machine, implemented through the gbm package. Gradient Boosted Machines are a tree ensemble method that were chosen for their ability to quickly implement a powerful and robust tree based algorithm used for classification and label scoring. 
+
+
+
+```{r}
+#Load in some needed libraries
+library(caret) #We will use caret for to create our stratified random sample
+library(e1071) #we will use e1071 for it's naiveBayes model
+library(neuralnet) #we will use the neuranet to create our neural network 
+library(gbm) #We will use gbm to fit our model
+```
+
+
+We will simplify our dataset for now, as we don't want to use the same variables represented different ways. 
+
+
+```{r}
+#Subsetting Data
+cancer.1<-cc[c(1,2,5,12,29)]
+
+
+#cancer.1 removing NA's for now
+canc<-na.omit(cancer.1)
+```
+
+
+Now we will do a simple train / test split. 
+
+
+```{r}
+#Set the starting state of the random number generator so it is reproducible
+set.seed(100)
+
+#Creating a stratified random sample  
+index<-createDataPartition(canc$Dx.Cancer,p=.8,list=FALSE)
+
+#Creating a training dataset of .8
+train.canc<-canc[index,]
+
+#Creating a test dataset of .2
+test.canc<-canc[-index,]
+
+#Removing the outcome variable to do a proper test
+test.canc.nov<-test.canc[c(1:4)]
+
+```
+
+Now that we have our training and testing data sets we can move on to fitting our models
+
+
+Our first model will be a Naive Bayes Classifier, which uses the `naiveBayes` function from the `e1071` package. The function is relatively simple to use but we'll implement what's called Laplace smoothing. Laplace smoothing introduces a correction to our Naive Bayes model in the instance that a value that should be seen in our training datasset but fails to occur (maybe in our random sampling, for example, we get no observations where the patient smokes), occurs in our testing dataset. The Laplace correction pretends the value is there and adjusts it's calculations accordingly.
+
+```{r}
+canc.nb <- naiveBayes(formula = as.factor(Dx.Cancer)~., #Train to optimize for status as y variable & all others as x
+                      data = train.canc, #Use our training data
+                      laplace = 1) #Implements Laplace smoothing 
+
+canc.nb.pred <- predict(canc.nb, test.canc.nov) #predicts values based off the variables in the testing data set
+table(canc.nb.pred, test.canc$Dx.Cancer) #creates a table that compares the results of the model and the testing dataset
+colnames(train.canc)
+```
+
+
+It seems like our Naive Bayes model correctly assumed all the negative cases, but predicted all diagnoses as negative. Suffice to say, this model isn't very effective. Maybe one of our other models will be more effective.
+
+
+Our second model is our neural network, found in the `neuralnet` package.
+
+```{r}
+canc.neuralnet <- neuralnet(formula = Dx.Cancer~Age + Number.of.sexual.partners + Smokes + STDs, #Train to optimize for status as y & all others as x
+                            data = train.canc, #Use our training data
+                            hidden = c(15,5), #How many nodes will be used
+                            lifesign = "minimal", #Determines how big the output will be
+                            linear.output = FALSE, #Determines if the model is non-linear or linear
+                            threshold = 0.005) #Sets the error threshold as the stopping condition
+```
+
+Here's what our neural net looks like.
+
+```{r}
+plot(canc.neuralnet, rep="best") #Creates a visualization of our neural network
+```
+
+
+```{r}
+canc.neuralnet.pred <- compute(canc.neuralnet, test.canc.nov) #predicts values based off the variables in the testing data set
+canc.neuralnet.results <- data.frame(actual = test.canc$Dx.Cancer, prediction = round(canc.neuralnet.pred$net.result)) #creates a dataframe
+table(canc.neuralnet.results[,1],canc.neuralnet.results[,2])
+```
+
+Again, we run into the problem of our model predicting all diagnoses as false. We'll explore this further in the last section of this report.
+
+
+Hopefully, our last model can do a better job.
+
+```{r}
+#Fit Gradient Boosted Machine
+set.seed(100)
+canc.gbm<-gbm(train.canc$Dx.Cancer~., #Train to optimize for status as y variable & all others as x
+             data=train.canc, #Use our training data
+             shrinkage=0.001, #How big of a step we take during gradient descent
+             distribution='bernoulli', #Binary outcome, therefore treat as bernoulli trial
+             cv.folds = 5, #Resample & create 5 cross-validation folds
+             n.trees=5000, #Create 5,000 trees
+             verbose=FALSE) #Don't print all the things; gbm prints a lot of output otherwise
+
+canc.gbm.model<-gbm.perf(canc.gbm,method="cv")
+```
+
+
+
+
+```{r}
+summary(canc.gbm)
+```
+
+
+
+
+```{r}
+canc.pred<-predict(canc.gbm,test.canc.nov,type="response") #Predictions
+#By using type equal to "repsonse" we get a probability of cancer for each training case. 
+
+# From Greg Rideway, the GBM package author: "Predictions are on the canonical scale, which for binomial us the log-odds scale. You can use the type="response" when predicting to put it on the probability scale." <- Thanks Mr. Ridgeway!
+
+
+# We then write the responses to a table; since we want to do this without "peeking" at the dataset, we do this with our test dataset that has no outcome variable included in it. Then we will write those predictions to the table that has the outcome variable & score the model. 
+
+canc.predprob.tbl<-as.data.frame(canc.pred) #Write our results to a table
+scored<-cbind.data.frame(test.canc,canc.predprob.tbl) # Put those results on the training dataset
+
+```
+
+
+
+Now that we have predicted our outcomes & brought our scores back together with our test dataset lets see how we did. We will be evaluatiing using the AUC with an ROC curve. 
+
+A few quick points: 
+
+1. AUC measures how good we did, you want it to be above .5 (random chance) & as close to 1 as possible, within reason of course - too high of an AUC means we may have a sign of overfitting. 
+
+2. For the ROC curve, we want it to be hugging the upper left-hand corner. 
+
+
+
+```{r}
+#Model Scoring
+library(pROC)
+canc.auc<-auc(scored$Dx.Cancer,scored$canc.pred)
+plot.roc(scored$Dx.Cancer,scored$canc.pred,main="GBM Model Performance")
+
+```
+
+
+```{r}
+canc.auc
+```
+
+Great - we now have our basic model fit & have learned that we have an AUC of ~.72 - not too bad, but we will need to test this model's validity later with further model building using a different set of variables. This was fit simply to test the power of a very simple model. 
+
+
+
+
+###Overall Interpretation/Actionable Insights
+
+Looking at our model output, it seems that patient age played the largest factor in predicting cancer, followed by a count of sexual partners, smoking status, & STDs. While this model seems to on the surface be doing ok, something lends a clue that it is not as good as it appears on the surface - we see that our Specificity plateaus & when looking at our predicted probabilities they are fairly low. Lets look further by taking a look at a simple example of why that might be:
+
+```{r}
+library(DescTools)
+Desc(scored$Dx.Cancer, plotit = FALSE)
+```
+
+
+We see that in our sample test population we only have 5 cases of cancer appearing. Now lets look at something within scored probabilities:
+
+
+```{r}
+max(scored$canc.pred)
+```
+
+The highest probability of developing cancer that was scored was 4% - meaning that our model is not properly picking up on scoring the dataset. Since our response variable has a large class imbalance our model is scoring everything as "not getting cancer" essentially. Therefore we need to use a different approach moving forward that better adjusts for a large class imbalance - such as a penalized model, a different model all together, etc. This shows us that while on first blush things look like this is an OK model - we as analyst know it is not. 
+
+
+
+
+
+###Citations
+
+Will need to cite the packages & their authors for:
+
+
+*pROC*
+*ggplot2*
+*GGally*
+*gbm*
+*caret*
+
+
+
+
+
+ 
