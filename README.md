@@ -1,4 +1,4 @@
-# MS Applied Data Science at Syracuse Projects
+# MS Applied Data Science at Syracuse University Projects
 This repository contains some of the projects done to fulfill coursework for the MS Applied Data Science program at Syracuse University.
 
 Projects are as follows:
